@@ -3,6 +3,7 @@ import time
 import numpy as np
 import heapq  # For priority queue implementation
 from collections import defaultdict
+import random
 
 # Function to read the grid from a file and extract bot positions
 def read_grid_and_bots_from_file(filename):
@@ -21,82 +22,86 @@ def read_grid_and_bots_from_file(filename):
 
 # Define actions and their corresponding moves
 actions = {
-    (0, -1): 'left',  # Left
-    (0, 1): 'right',  # Right
-    (-1, 0): 'up',    # Up
-    (1, 0): 'down'    # Down
+    0: (0, -1),  # Left
+    1: (0, 1),   # Right
+    2: (-1, 0),  # Up
+    3: (1, 0)    # Down
 }
 
-# Pathfinding function using Dijkstra's algorithm
-def dijkstra(grid, start, goal):
-    rows, cols = len(grid), len(grid[0])
-    priority_queue = []
-    heapq.heappush(priority_queue, (0, start))  # (cost, position)
-    came_from = {}
-    cost_so_far = defaultdict(lambda: float('inf'))
-    cost_so_far[start] = 0
-
-    while priority_queue:
-        current_cost, current = heapq.heappop(priority_queue)
-
-        if current == goal:
-            break
-        
-        for action in actions.keys():
-            new_pos = (current[0] + action[0], current[1] + action[1])
-            
-            # Check bounds and obstacles
-            if 0 <= new_pos[0] < rows and 0 <= new_pos[1] < cols and grid[new_pos[0]][new_pos[1]] != 'X':
-                new_cost = current_cost + 1  # Assuming all moves cost 1
-                if new_cost < cost_so_far[new_pos]:
-                    cost_so_far[new_pos] = new_cost
-                    priority_queue.append((new_cost, new_pos))
-                    came_from[new_pos] = current
-                    heapq.heapify(priority_queue)  # Reorganize the heap
-
-    # Reconstruct path from start to goal
-    path = []
-    current = goal
-    while current in came_from:
-        path.append(current)
-        current = came_from[current]
-    path.reverse()  # Reverse the path to get from start to goal
-
-    return path
-
-# Define autobot class
-class Autobot:
-    def __init__(self, start, dest, grid, name):
+# Define autobot class using Q-learning
+class AutobotQLearning:
+    def __init__(self, start, dest, grid, name, alpha=0.1, gamma=0.9, epsilon=0.1):
         self.pos = start  # Start position
         self.dest = dest  # Destination position
         self.grid = grid  # Warehouse grid
-        self.path = self.find_path()  # Find the path using Dijkstra
         self.name = name  # Bot name for identification
+        self.q_table = defaultdict(lambda: [0, 0, 0, 0])  # Initialize Q-table with zeros
+        self.alpha = alpha  # Learning rate
+        self.gamma = gamma  # Discount factor
+        self.epsilon = epsilon  # Exploration rate
         self.index = 0  # Index to track current position in path
         self.waiting = False  # Flag to indicate if the bot is waiting
+        self.learned_path = []  # To store the learned path
+    
+    def get_state(self):
+        return self.pos
 
-    def find_path(self):
-        return dijkstra(self.grid, self.pos, self.dest)
-
-    def move(self, bots):
-        if self.index < len(self.path):
-            next_pos = self.path[self.index]
-            # Check for collision
-            if not any(bot.pos == next_pos for bot in bots if bot != self):
-                self.pos = next_pos  # Move to the next position
-                self.index += 1
-                self.waiting = False  # Not waiting anymore
-            else:
-                self.waiting = True  # Mark as waiting if the position is occupied
+    def choose_action(self):
+        # Epsilon-greedy strategy to choose the action
+        if random.uniform(0, 1) < self.epsilon:
+            return random.choice(list(actions.keys()))  # Explore
         else:
-            self.waiting = False  # If path is complete, not waiting
+            return np.argmax(self.q_table[self.get_state()])  # Exploit best action from Q-table
+
+    def update_q_value(self, state, action, reward, next_state):
+        old_value = self.q_table[state][action]
+        future_value = max(self.q_table[next_state])  # Max Q-value for the next state
+        # Q-Learning formula: Q(s, a) = (1 - alpha) * Q(s, a) + alpha * [reward + gamma * max(Q(s', a'))]
+        self.q_table[state][action] = old_value + self.alpha * (reward + self.gamma * future_value - old_value)
+
+    def get_reward(self, new_pos):
+        if new_pos == self.dest:
+            return 100  # Large positive reward for reaching the destination
+        elif self.grid[new_pos[0]][new_pos[1]] == 'X':  # Obstacle
+            return -100  # Large negative reward for hitting an obstacle
+        else:
+            return -1  # Small negative reward for each step taken
+    
+    def move(self, bots):
+        if self.pos == self.dest:
+            return  # Stop if the bot has reached its destination
+        
+        state = self.get_state()
+        action = self.choose_action()
+        new_pos = (self.pos[0] + actions[action][0], self.pos[1] + actions[action][1])
+        
+        # Check bounds and obstacles
+        rows, cols = len(self.grid), len(self.grid[0])
+        if 0 <= new_pos[0] < rows and 0 <= new_pos[1] < cols and self.grid[new_pos[0]][new_pos[1]] != 'X':
+            # Check for collision with other bots
+            if not any(bot.pos == new_pos for bot in bots if bot != self):
+                reward = self.get_reward(new_pos)
+                next_state = new_pos
+                # Update Q-table
+                self.update_q_value(state, action, reward, next_state)
+                
+                # Move the bot
+                self.pos = new_pos
+                self.learned_path.append(self.pos)  # Keep track of the learned path
+            else:
+                reward = -10  # Penalty for collision
+                self.update_q_value(state, action, reward, state)
+        else:
+            reward = -10  # Penalty for out-of-bounds or obstacle move
+            self.update_q_value(state, action, reward, state)
 
 # Read grid and bot positions from the specified file
 grid, bot_positions = read_grid_and_bots_from_file('matrix.txt')
 
 # Dynamically initialize Autobots using the parsed positions
-bot1 = Autobot(start=bot_positions['A1'], dest=bot_positions['B1'], grid=grid, name="Bot 1")
-bot2 = Autobot(start=bot_positions['A2'], dest=bot_positions['B2'], grid=grid, name="Bot 2")
+bot1 = AutobotQLearning(start=bot_positions['A1'], dest=bot_positions['B1'], grid=grid, name="Bot 1")
+bot2 = AutobotQLearning(start=bot_positions['A2'], dest=bot_positions['B2'], grid=grid, name="Bot 2")
+bot3 = AutobotQLearning(start=bot_positions['A3'], dest=bot_positions['B3'], grid=grid, name="Bot 3")
 
 # GUI Setup
 def create_gui(grid, bots):
@@ -157,4 +162,4 @@ def create_gui(grid, bots):
     root.mainloop()
 
 # Create the GUI and start the animation
-create_gui(grid, [bot1, bot2])
+create_gui(grid, [bot1, bot2, bot3])
