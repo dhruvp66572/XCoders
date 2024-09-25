@@ -6,11 +6,11 @@ from tkinter import filedialog, messagebox, simpledialog
 
 # Function to generate a random grid with obstacles
 def generate_random_grid(rows, cols, obstacle_count):
-    grid = [[' ' for _ in range(cols)] for _ in range(rows)]
+    grid = [['.' for _ in range(cols)] for _ in range(rows)]
     for _ in range(obstacle_count):
         while True:
             r, c = random.randint(0, rows - 1), random.randint(0, cols - 1)
-            if grid[r][c] == ' ':
+            if grid[r][c] == '.':
                 grid[r][c] = 'X'
                 break
     return grid
@@ -40,12 +40,21 @@ def read_multiple_grids(file_list):
     
     return grids, bot_positions_list
 
-# Define actions and their corresponding moves
+# Define commands and their corresponding moves
 actions = {
-    0: (0, -1),  # Left
-    1: (0, 1),   # Right
-    2: (-1, 0),  # Up
-    3: (1, 0)    # Down
+    0: (0, 1),   # Forward
+    1: (0, -1),  # Reverse
+    2: (-1, 0),  # Left
+    3: (1, 0),   # Right
+    4: (0, 0)    # Wait
+}
+
+commands_dict = {
+    0: 'Forward',
+    1: 'Reverse',
+    2: 'Left',
+    3: 'Right',
+    4: 'Wait'
 }
 
 # Define autobot class using Q-learning
@@ -55,7 +64,7 @@ class AutobotQLearning:
         self.dest = dest
         self.grid = grid
         self.name = name
-        self.q_table = defaultdict(lambda: [0, 0, 0, 0])
+        self.q_table = defaultdict(lambda: [0, 0, 0, 0, 0])  # Added Wait command
         self.alpha = alpha
         self.gamma = gamma
         self.epsilon = epsilon
@@ -64,7 +73,9 @@ class AutobotQLearning:
         self.reached = False
         self.learned_path = []
         self.rows, self.cols = len(self.grid), len(self.grid[0])
-    
+        self.command_log = []  # Log of each command issued to this bot
+        self.command_count = 0  # Total number of commands issued
+
     def get_state(self):
         return self.pos
 
@@ -90,27 +101,41 @@ class AutobotQLearning:
     def is_valid_position(self, pos):
         return 0 <= pos[0] < self.rows and 0 <= pos[1] < self.cols and self.grid[pos[0]][pos[1]] != 'X'
 
-    def move(self, bots):
+    def move(self, bots, collision_cells):
         if self.pos == self.dest:
             if not self.reached:
                 self.reached = True
+                self.command_log.append(f"{self.name} reached its destination in {self.steps} steps!")
             return
 
         state = self.get_state()
         action = self.choose_action()
         new_pos = (self.pos[0] + actions[action][0], self.pos[1] + actions[action][1])
-        
+
+        # Check if another bot is at the same position
         if self.is_valid_position(new_pos) and not any(bot.pos == new_pos for bot in bots if bot != self):
             reward = self.get_reward(new_pos)
             next_state = new_pos
             self.update_q_value(state, action, reward, next_state)
             self.pos = new_pos
             self.steps += 1
+            self.command_count += 1
             self.learned_path.append(self.pos)
-            self.time_taken += 0.5  # Increment time taken for each step (500ms)
+            self.time_taken += 1  # Increment time taken for each step (1 unit)
+            self.command_log.append(f"{self.name}: {commands_dict[action]}")
         else:
+            # Wait if there's a potential collision or invalid move
             reward = -10
-            self.update_q_value(state, action, reward, state)
+            self.update_q_value(state, 4, reward, state)  # Use Wait command
+            collision_cells.add(self.pos)
+            self.command_log.append(f"{self.name}: Wait (collision/invalid move)")
+            self.command_count += 1
+            self.steps += 1
+            self.time_taken += 1
+
+    # Output performance metrics for each bot
+    def get_performance_metrics(self):
+        return f"{self.name}: Total Time: {self.time_taken}, Total Commands: {self.command_count}, Steps: {self.steps}"
 
 # GUI Setup with dynamic matrix switching
 def create_gui(grids, bot_positions_list):
@@ -166,20 +191,24 @@ def create_gui(grids, bot_positions_list):
         def animate_bots(bots):
             canvas.delete("bot")
             bot_statuses = []
+            collision_cells = set()  # Track collision cells
+            for bot in bots:
+                bot.move(bots, collision_cells)
+
             for bot in bots:
                 current_pos = bot.pos
                 if 0 <= current_pos[0] < len(grids[current_grid_idx]) and 0 <= current_pos[1] < len(grids[current_grid_idx][0]):
+                    # Check if the bot's current position is a collision cell
+                    color = 'yellow' if current_pos in collision_cells else 'lightblue'
+
                     # Show learned path as a trail
                     if bot.learned_path:
                         for pos in bot.learned_path:
                             canvas.create_rectangle(pos[1] * cell_size, pos[0] * cell_size,
                                                     (pos[1] + 1) * cell_size, (pos[0] + 1) * cell_size,
-                                                    fill='lightblue', outline="black")
+                                                    fill=color, outline="black")
                     canvas.create_text(current_pos[1] * cell_size + 50, current_pos[0] * cell_size + 50, 
                                        text="🚗" if bot.name == "Bot 1" else "🚙", font=("Arial", 24), tags="bot")
-                
-                if bot.pos == bot.dest:
-                    print(f"{bot.name} reached its destination in {bot.steps} steps!")
                 
                 # Collect bot status for display
                 bot_statuses.append(f"{bot.name}: Steps: {bot.steps}, Time: {round(bot.time_taken, 2)}s")
@@ -189,8 +218,6 @@ def create_gui(grids, bot_positions_list):
             root.update()
 
         def update():
-            for bot in bots:
-                bot.move(bots)
             animate_bots(bots)
             root.after(500, update)
 
