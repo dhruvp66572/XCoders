@@ -159,9 +159,10 @@ def create_gui(grids, bot_positions_list):
                 current_pos = bot.pos
                 if 0 <= current_pos[0] < len(grids[current_grid_idx]) and 0 <= current_pos[1] < len(grids[current_grid_idx][0]):
                     canvas.create_text(current_pos[1] * cell_size + 50, current_pos[0] * cell_size + 50, 
-                                       text="🚗" if bot.name == "Bot 1" else "🚙", font=("Arial", 24), tags="bot")
-                if bot.pos == bot.dest:
+                                        text=bot.name, font=("Arial", 16), tag="bot")
+                if bot.pos == bot.dest:                
                     print(f"{bot.name} reached its destination in {bot.time_taken} steps!")
+                    
             root.update()
 
         def update():
