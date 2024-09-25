@@ -2,14 +2,14 @@ import tkinter as tk
 import time
 from collections import deque
 
-# Grid Layout with Start (A1, B2), End (B1, B2), and Obstacles ('X')
-grid = [
-    ['A1', '.', '.', 'X', 'B1'],
-    ['.',  'X', '.', '.', '.'],
-    ['.',  '.', 'X', '.', '.'],
-    ['.',  '.', '.', '.', '.'],
-    ['B2', 'X', '.', '.', 'B2']
-]
+# Function to read the grid from a file
+def read_grid_from_file(filename):
+    with open(filename, 'r') as file:
+        grid = [line.strip().split() for line in file]
+    return grid
+
+# Read grid from the specified file
+grid = read_grid_from_file('matrix.txt')
 
 # Directions: North (Up), East (Right), South (Down), West (Left)
 DIRECTIONS = {
@@ -19,40 +19,19 @@ DIRECTIONS = {
     'W': (0, -1)   # Move left
 }
 
-# Command mappings based on direction change
-commands = {
-    ('N', 'N'): 'Forward()',
-    ('N', 'E'): 'Right(), Forward()',
-    ('N', 'S'): 'Right(), Right(), Forward()',
-    ('N', 'W'): 'Left(), Forward()',
-    ('E', 'N'): 'Left(), Forward()',
-    ('E', 'E'): 'Forward()',
-    ('E', 'S'): 'Right(), Forward()',
-    ('E', 'W'): 'Right(), Right(), Forward()',
-    ('S', 'N'): 'Right(), Right(), Forward()',
-    ('S', 'E'): 'Left(), Forward()',
-    ('S', 'S'): 'Forward()',
-    ('S', 'W'): 'Right(), Forward()',
-    ('W', 'N'): 'Right(), Forward()',
-    ('W', 'E'): 'Right(), Right(), Forward()',
-    ('W', 'S'): 'Left(), Forward()',
-    ('W', 'W'): 'Forward()'
-}
-
 # BFS for shortest path
 def bfs(grid, start, goal):
     rows, cols = len(grid), len(grid[0])
     queue = deque([(start, 'N')])  # Queue stores position and direction (facing North initially)
     visited = set([start])  # Track visited cells
     parent_map = {}  # Track the path
-    direction_map = {start: 'N'}  # Start facing North
     
     while queue:
-        (r, c), direction = queue.popleft()
+        (r, c), _ = queue.popleft()
         
         # If goal is reached
         if (r, c) == goal:
-            return reconstruct_path(parent_map, direction_map, start, goal)
+            return reconstruct_path(parent_map, start, goal)
 
         # Explore neighbors in 4 possible directions (N, E, S, W)
         for d in DIRECTIONS:
@@ -61,22 +40,18 @@ def bfs(grid, start, goal):
                 visited.add((nr, nc))
                 queue.append(((nr, nc), d))
                 parent_map[(nr, nc)] = (r, c)
-                direction_map[(nr, nc)] = d
 
     return []
 
 # Reconstruct the path from goal to start
-def reconstruct_path(parent_map, direction_map, start, goal):
+def reconstruct_path(parent_map, start, goal):
     path = []
     current = goal
-    direction = direction_map[goal]
     
     while current != start:
         prev = parent_map[current]
-        prev_direction = direction_map[prev]
-        path.append((prev, direction))  # Store the movement command and position
+        path.append(prev)  # Store the movement position
         current = prev
-        direction = prev_direction
     
     path.reverse()  # Reverse the path to get from start to goal
     return path
@@ -88,14 +63,15 @@ class Autobot:
         self.dest = dest  # Destination position
         self.grid = grid  # Warehouse grid
         self.path = []  # Store the movement path
+        self.is_stopped = False  # Track if the bot is stopped
 
     def move(self):
         # Get the shortest path using BFS
         self.path = bfs(self.grid, self.pos, self.dest)
 
 # Initialize Autobots with start and destination positions
-bot1 = Autobot(start=(0, 0), dest=(0, 4), grid=grid)  # Bot A1 to top-right B1
-bot2 = Autobot(start=(4, 0), dest=(4, 4), grid=grid)  # Bot B2 to bottom-right B2
+bot1 = Autobot(start=(0, 0), dest=(0, 4), grid=grid)  # Bot A1 to B1
+bot2 = Autobot(start=(4, 0), dest=(4, 4), grid=grid)  # Bot A2 to B2
 
 # Run the movement simulation for both bots
 bot1.move()
@@ -124,7 +100,7 @@ def create_gui(grid, bot_paths):
 
             if grid[r][c] == 'X':
                 color = 'red'  # Obstacle
-            elif grid[r][c] == 'A1' or grid[r][c] == 'B2':
+            elif grid[r][c] == 'A1' or grid[r][c] == 'A2':
                 color = 'green'  # Start point
             elif grid[r][c] == 'B1' or grid[r][c] == 'B2':
                 color = 'yellow'  # End point
@@ -135,17 +111,62 @@ def create_gui(grid, bot_paths):
             cells[(r, c)] = cell
 
     # Function to animate the autobots
-    def animate_bot(bot_path, color):
-        for (pos, _) in bot_path:
-            time.sleep(0.5)
-            r, c = pos
-            canvas.itemconfig(cells[(r, c)], fill=color)
-            root.update_idletasks()
-    
-    # Animate Bot1
-    root.after(1000, lambda: animate_bot(bot1.path, "blue"))
-    # Animate Bot2
-    root.after(2000, lambda: animate_bot(bot2.path, "blue"))
+    def animate_bots(bot_paths):
+        bot1_index = 0
+        bot2_index = 0
+        
+        while bot1_index < len(bot_paths[0]) or bot2_index < len(bot_paths[1]):
+            # Check for collisions
+            if bot1_index < len(bot_paths[0]) and bot2_index < len(bot_paths[1]):
+                if bot_paths[0][bot1_index] == bot_paths[1][bot2_index]:
+                    # If they collide, change their colors
+                    canvas.itemconfig(cells[bot_paths[0][bot1_index]], fill="gray")  # Change to gray on collision
+                    root.update()
+                    time.sleep(1)  # Pause for collision
+
+                    # Prioritize the bot with the shorter path to continue
+                    if len(bot_paths[0]) < len(bot_paths[1]):
+                        bot1_index += 1  # Move bot1
+                    else:
+                        bot2_index += 1  # Move bot2
+                else:
+                    # Animate both bots
+                    if bot1_index < len(bot_paths[0]):
+                        r, c = bot_paths[0][bot1_index]
+                        canvas.itemconfig(cells[(r, c)], fill="blue")  # Animate Bot 1
+                        bot1_index += 1
+
+                    if bot2_index < len(bot_paths[1]):
+                        r, c = bot_paths[1][bot2_index]
+                        canvas.itemconfig(cells[(r, c)], fill="purple")  # Animate Bot 2
+                        bot2_index += 1
+            else:
+                # Move remaining bots if one has finished
+                if bot1_index < len(bot_paths[0]):
+                    r, c = bot_paths[0][bot1_index]
+                    canvas.itemconfig(cells[(r, c)], fill="blue")  # Animate Bot 1
+                    bot1_index += 1
+
+                if bot2_index < len(bot_paths[1]):
+                    r, c = bot_paths[1][bot2_index]
+                    canvas.itemconfig(cells[(r, c)], fill="purple")  # Animate Bot 2
+                    bot2_index += 1
+
+            # Check if bots reached their destinations
+            if bot1_index >= len(bot_paths[0]) and bot2_index >= len(bot_paths[1]):
+                break  # Exit if both are done
+
+            # Change the end cell color to green if the destination is reached
+            if bot1_index == len(bot_paths[0]) and bot_paths[0][-1] == bot1.dest:
+                canvas.itemconfig(cells[bot1.dest], fill="green")  # Change to green for Bot 1
+            if bot2_index == len(bot_paths[1]) and bot_paths[1][-1] == bot2.dest:
+                canvas.itemconfig(cells[bot2.dest], fill="green")  # Change to green for Bot 2
+            
+            root.update()
+            time.sleep(0.5)  # Control animation speed
+
+    # Animate both bots
+    root.after(1000, lambda: animate_bots([bot1.path, bot2.path]))
 
     root.mainloop()
 
