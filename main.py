@@ -2,14 +2,23 @@ import tkinter as tk
 import time
 from collections import deque
 
-# Function to read the grid from a file
-def read_grid_from_file(filename):
+# Function to read the grid from a file and extract bot positions
+def read_grid_and_bots_from_file(filename):
+    grid = []
+    bot_positions = {}  # Dictionary to store autobot start and destination positions
+    
     with open(filename, 'r') as file:
-        grid = [line.strip().split() for line in file]
-    return grid
+        for r, line in enumerate(file):
+            row = line.strip().split()
+            grid.append(row)
+            for c, cell in enumerate(row):
+                if cell.startswith('A') or cell.startswith('B'):
+                    bot_positions[cell] = (r, c)
+    
+    return grid, bot_positions
 
-# Read grid from the specified file
-grid = read_grid_from_file('matrix.txt')
+# Read grid and bot positions from the specified file
+grid, bot_positions = read_grid_and_bots_from_file('matrix.txt')
 
 # Directions: North (Up), East (Right), South (Down), West (Left)
 DIRECTIONS = {
@@ -58,27 +67,34 @@ def reconstruct_path(parent_map, start, goal):
 
 # Define autobot class
 class Autobot:
-    def __init__(self, start, dest, grid):
+    def __init__(self, start, dest, grid, name):
         self.pos = start  # Start position
         self.dest = dest  # Destination position
         self.grid = grid  # Warehouse grid
         self.path = []  # Store the movement path
-        self.is_stopped = False  # Track if the bot is stopped
+        self.name = name  # Bot name for identification
+        self.reached = False  # Check if the bot has reached its destination
+        self.is_paused = False  # Bot can be paused momentarily
+        self.waiting = False  # If bot is waiting due to a collision
 
     def move(self):
         # Get the shortest path using BFS
         self.path = bfs(self.grid, self.pos, self.dest)
 
-# Initialize Autobots with start and destination positions
-bot1 = Autobot(start=(0, 0), dest=(0, 4), grid=grid)  # Bot A1 to B1
-bot2 = Autobot(start=(4, 0), dest=(4, 4), grid=grid)  # Bot A2 to B2
+    def remaining_distance(self, current_position):
+        """Returns the remaining distance to destination from the current position."""
+        return abs(self.dest[0] - current_position[0]) + abs(self.dest[1] - current_position[1])
+
+# Dynamically initialize Autobots using the parsed positions
+bot1 = Autobot(start=bot_positions['A1'], dest=bot_positions['B1'], grid=grid, name="Bot 1")
+bot2 = Autobot(start=bot_positions['A2'], dest=bot_positions['B2'], grid=grid, name="Bot 2")
 
 # Run the movement simulation for both bots
 bot1.move()
 bot2.move()
 
 # GUI Setup
-def create_gui(grid, bot_paths):
+def create_gui(grid, bots):
     root = tk.Tk()
     root.title("Autobot Warehouse Simulation")
 
@@ -100,10 +116,10 @@ def create_gui(grid, bot_paths):
 
             if grid[r][c] == 'X':
                 color = 'red'  # Obstacle
-            elif grid[r][c] == 'A1' or grid[r][c] == 'A2':
+            elif grid[r][c].startswith('A'):
                 color = 'green'  # Start point
-            elif grid[r][c] == 'B1' or grid[r][c] == 'B2':
-                color = 'yellow'  # End point
+            elif grid[r][c].startswith('B'):
+                color = 'orange'  # End point
             else:
                 color = 'white'  # Empty cells
 
@@ -111,64 +127,76 @@ def create_gui(grid, bot_paths):
             cells[(r, c)] = cell
 
     # Function to animate the autobots
-    def animate_bots(bot_paths):
-        bot1_index = 0
-        bot2_index = 0
-        
-        while bot1_index < len(bot_paths[0]) or bot2_index < len(bot_paths[1]):
-            # Check for collisions
-            if bot1_index < len(bot_paths[0]) and bot2_index < len(bot_paths[1]):
-                if bot_paths[0][bot1_index] == bot_paths[1][bot2_index]:
-                    # If they collide, change their colors
-                    canvas.itemconfig(cells[bot_paths[0][bot1_index]], fill="gray")  # Change to gray on collision
-                    root.update()
-                    time.sleep(1)  # Pause for collision
+    def animate_bots(bots):
+        bot_indexes = {bot.name: 0 for bot in bots}  # Track the path index of each bot
+        collision_positions = set()  # To track positions with collisions
 
-                    # Prioritize the bot with the shorter path to continue
-                    if len(bot_paths[0]) < len(bot_paths[1]):
-                        bot1_index += 1  # Move bot1
-                    else:
-                        bot2_index += 1  # Move bot2
-                else:
-                    # Animate both bots
-                    if bot1_index < len(bot_paths[0]):
-                        r, c = bot_paths[0][bot1_index]
-                        canvas.itemconfig(cells[(r, c)], fill="blue")  # Animate Bot 1
-                        bot1_index += 1
+        while any(bot_indexes[bot.name] < len(bot.path) for bot in bots):
+            for bot in bots:
+                if bot_indexes[bot.name] < len(bot.path):
+                    next_position = bot.path[bot_indexes[bot.name]]
 
-                    if bot2_index < len(bot_paths[1]):
-                        r, c = bot_paths[1][bot2_index]
-                        canvas.itemconfig(cells[(r, c)], fill="purple")  # Animate Bot 2
-                        bot2_index += 1
-            else:
-                # Move remaining bots if one has finished
-                if bot1_index < len(bot_paths[0]):
-                    r, c = bot_paths[0][bot1_index]
-                    canvas.itemconfig(cells[(r, c)], fill="blue")  # Animate Bot 1
-                    bot1_index += 1
+                    # Check if canvas still exists
+                    if not canvas.winfo_exists():
+                        print("Canvas does not exist anymore, stopping animation.")
+                        return
 
-                if bot2_index < len(bot_paths[1]):
-                    r, c = bot_paths[1][bot2_index]
-                    canvas.itemconfig(cells[(r, c)], fill="purple")  # Animate Bot 2
-                    bot2_index += 1
+                    # Collision detection
+                    is_collision = False
+                    for other_bot in bots:
+                        if bot != other_bot and bot_indexes[other_bot.name] < len(other_bot.path):
+                            if next_position == other_bot.path[bot_indexes[other_bot.name]]:
+                                is_collision = True
+                                collision_positions.add(next_position)
+                                
+                                # Ensure canvas and cell exist before updating
+                                if next_position in cells and canvas.winfo_exists():
+                                    canvas.itemconfig(cells[next_position], fill="gray")  # Mark collision
+                                root.update()
+                                time.sleep(1)  # Pause on collision
 
-            # Check if bots reached their destinations
-            if bot1_index >= len(bot_paths[0]) and bot2_index >= len(bot_paths[1]):
-                break  # Exit if both are done
+                                # Determine which bot is closer to its destination
+                                bot_remaining_distance = bot.remaining_distance(next_position)
+                                other_bot_remaining_distance = other_bot.remaining_distance(other_bot.path[bot_indexes[other_bot.name]])
 
-            # Change the end cell color to green if the destination is reached
-            if bot1_index == len(bot_paths[0]) and bot_paths[0][-1] == bot1.dest:
-                canvas.itemconfig(cells[bot1.dest], fill="green")  # Change to green for Bot 1
-            if bot2_index == len(bot_paths[1]) and bot_paths[1][-1] == bot2.dest:
-                canvas.itemconfig(cells[bot2.dest], fill="green")  # Change to green for Bot 2
-            
+                                # Give priority to the bot closer to the destination
+                                if bot_remaining_distance < other_bot_remaining_distance:
+                                    other_bot.is_paused = True  # Pause the other bot
+                                    bot.is_paused = False  # Allow the current bot to move
+                                else:
+                                    bot.is_paused = True
+                                    other_bot.is_paused = False
+
+                                break
+
+                    if not is_collision:
+                        collision_positions.discard(next_position)  # Clear position if no more collision
+                        r, c = next_position
+                        
+                        # Ensure canvas and cell exist before updating
+                        if canvas.winfo_exists() and (r, c) in cells:
+                            canvas.itemconfig(cells[(r, c)], fill="blue" if bot.name == "Bot 1" else "purple")  # Animate bot
+                        bot_indexes[bot.name] += 1
+
+                    # Allow bots to continue moving even after a collision
+                    if is_collision:
+                        bot_indexes[bot.name] += 1  # Move to the next position regardless of collision
+
             root.update()
             time.sleep(0.5)  # Control animation speed
 
-    # Animate both bots
-    root.after(1000, lambda: animate_bots([bot1.path, bot2.path]))
+            # Check if bots reached their destination
+            for bot in bots:
+                if bot_indexes[bot.name] == len(bot.path):
+                    bot.reached = True
+                    if canvas.winfo_exists() and bot.dest in cells:
+                        canvas.itemconfig(cells[bot.dest], fill="green")  # Destination reached
+                    print(f"{bot.name} reached its destination!")
+
+    # Start the animation
+    root.after(1000, lambda: animate_bots(bots))
 
     root.mainloop()
 
 # Create the GUI and start the animation
-create_gui(grid, [bot1.path, bot2.path])
+create_gui(grid, [bot1, bot2])
