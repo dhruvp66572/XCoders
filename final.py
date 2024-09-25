@@ -60,7 +60,7 @@ class AutobotQLearning:
         self.gamma = gamma
         self.epsilon = epsilon
         self.steps = 0
-        self.time_taken = None
+        self.time_taken = 0  # Track time taken in seconds
         self.reached = False
         self.learned_path = []
         self.rows, self.cols = len(self.grid), len(self.grid[0])
@@ -94,7 +94,6 @@ class AutobotQLearning:
         if self.pos == self.dest:
             if not self.reached:
                 self.reached = True
-                self.time_taken = self.steps
             return
 
         state = self.get_state()
@@ -108,6 +107,7 @@ class AutobotQLearning:
             self.pos = new_pos
             self.steps += 1
             self.learned_path.append(self.pos)
+            self.time_taken += 0.5  # Increment time taken for each step (500ms)
         else:
             reward = -10
             self.update_q_value(state, action, reward, state)
@@ -134,6 +134,9 @@ def create_gui(grids, bot_positions_list):
 
     canvas = tk.Canvas(root, width=500, height=500)
     canvas.grid(row=1, column=0)
+
+    status_label = tk.Label(root, text="", font=("Arial", 14))
+    status_label.grid(row=2, column=0)
 
     cell_size = 100
 
@@ -162,6 +165,7 @@ def create_gui(grids, bot_positions_list):
     def update_bots(bots):
         def animate_bots(bots):
             canvas.delete("bot")
+            bot_statuses = []
             for bot in bots:
                 current_pos = bot.pos
                 if 0 <= current_pos[0] < len(grids[current_grid_idx]) and 0 <= current_pos[1] < len(grids[current_grid_idx][0]):
@@ -173,8 +177,15 @@ def create_gui(grids, bot_positions_list):
                                                     fill='lightblue', outline="black")
                     canvas.create_text(current_pos[1] * cell_size + 50, current_pos[0] * cell_size + 50, 
                                        text="🚗" if bot.name == "Bot 1" else "🚙", font=("Arial", 24), tags="bot")
+                
                 if bot.pos == bot.dest:
-                    print(f"{bot.name} reached its destination in {bot.time_taken} steps!")
+                    print(f"{bot.name} reached its destination in {bot.steps} steps!")
+                
+                # Collect bot status for display
+                bot_statuses.append(f"{bot.name}: Steps: {bot.steps}, Time: {round(bot.time_taken, 2)}s")
+
+            # Update the status label with the latest information
+            status_label.config(text="\n".join(bot_statuses))
             root.update()
 
         def update():
