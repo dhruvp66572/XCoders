@@ -1,9 +1,20 @@
 import tkinter as tk
-import time
 import numpy as np
 from collections import defaultdict
 import random
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
+
+# Function to generate a random grid with obstacles
+def generate_random_grid(rows, cols, obstacle_count):
+    grid = [[' ' for _ in range(cols)] for _ in range(rows)]
+    # Place obstacles
+    for _ in range(obstacle_count):
+        while True:
+            r, c = random.randint(0, rows - 1), random.randint(0, cols - 1)
+            if grid[r][c] == ' ':
+                grid[r][c] = 'X'
+                break
+    return grid
 
 # Function to read grid and bot positions from multiple files
 def read_multiple_grids(file_list):
@@ -34,7 +45,7 @@ actions = {
     3: (1, 0)    # Down
 }
 
-# Define autobot class using Q-learning (same as previous)
+# Define autobot class using Q-learning
 class AutobotQLearning:
     def __init__(self, start, dest, grid, name, alpha=0.1, gamma=0.9, epsilon=0.1):
         self.pos = start
@@ -115,11 +126,11 @@ def create_gui(grids, bot_positions_list):
     # Load Autobots dynamically based on selected grid
     def load_bots_for_grid(grid_index):
         bot_positions = bot_positions_list[grid_index]
-        bots = [
-            AutobotQLearning(start=bot_positions['A1'], dest=bot_positions['B1'], grid=grids[grid_index], name="Bot 1"),
-            AutobotQLearning(start=bot_positions['A2'], dest=bot_positions['B2'], grid=grids[grid_index], name="Bot 2"),
-            AutobotQLearning(start=bot_positions['A3'], dest=bot_positions['B3'], grid=grids[grid_index], name="Bot 3")
-        ]
+        bots = []
+        for bot_name, positions in bot_positions.items():
+            start, dest = positions
+            print(f"Bot {bot_name}: Start={start}, Dest={dest}")  # Debug print
+            bots.append(AutobotQLearning(start=start, dest=dest, grid=grids[grid_index], name=bot_name))
         return bots
 
     # Canvas for drawing grid
@@ -181,14 +192,40 @@ def create_gui(grids, bot_positions_list):
 
     root.mainloop()
 
-# File dialog to select multiple grid files
+# File dialog to select multiple grid files or generate new grids
 def open_files():
-    file_paths = filedialog.askopenfilenames(title="Select Matrix Files", filetypes=[("Text files", "*.txt")])
-    if file_paths:
-        grids, bot_positions_list = read_multiple_grids(file_paths)
-        create_gui(grids, bot_positions_list)
+    # Ask user if they want to load from files or generate a grid
+    choice = messagebox.askquestion("Load Grids", "Do you want to load grid files? (Yes for loading, No for generating new grid)")
+    if choice == 'yes':
+        file_paths = filedialog.askopenfilenames(title="Select Matrix Files", filetypes=[("Text files", "*.txt")])
+        if file_paths:
+            grids, bot_positions_list = read_multiple_grids(file_paths)
+            create_gui(grids, bot_positions_list)
+        else:
+            messagebox.showwarning("No files selected", "Please select at least one file!")
     else:
-        messagebox.showwarning("No files selected", "Please select at least one file!")
+        # Prompt user for grid dimensions and obstacle count
+        rows = simpledialog.askinteger("Input", "Enter number of rows:")
+        cols = simpledialog.askinteger("Input", "Enter number of columns:")
+        obstacle_count = simpledialog.askinteger("Input", "Enter number of obstacles:")
+        grid = generate_random_grid(rows, cols, obstacle_count)
+
+        # Get bot starting and ending positions
+        bot_positions = {}
+        while True:
+            bot_name = simpledialog.askstring("Input", "Enter bot name (or leave blank to finish):")
+            if not bot_name:
+                break
+            start = simpledialog.askstring("Input", f"Enter start position for {bot_name} (format: row,column):")
+            dest = simpledialog.askstring("Input", f"Enter destination position for {bot_name} (format: row,column):")
+            if start and dest:
+                start = tuple(map(int, start.split(',')))
+                dest = tuple(map(int, dest.split(',')))
+                bot_positions[bot_name] = (start, dest)
+
+        grids = [grid]
+        bot_positions_list = [bot_positions]
+        create_gui(grids, bot_positions_list)
 
 # Main entry point to start the program
 if __name__ == "__main__":
