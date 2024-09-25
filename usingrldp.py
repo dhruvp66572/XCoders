@@ -1,9 +1,8 @@
 import tkinter as tk
 import time
 import numpy as np
-import heapq  # For priority queue implementation
-from collections import defaultdict
 import random
+from collections import defaultdict
 
 # Function to read the grid from a file and extract bot positions
 def read_grid_and_bots_from_file(filename):
@@ -39,15 +38,13 @@ class AutobotQLearning:
         self.alpha = alpha  # Learning rate
         self.gamma = gamma  # Discount factor
         self.epsilon = epsilon  # Exploration rate
-        self.index = 0  # Index to track current position in path
-        self.waiting = False  # Flag to indicate if the bot is waiting
-        self.learned_path = []  # To store the learned path
-    
+        self.steps = 0  # Count of steps taken
+        self.start_time = time.time()  # Start time for calculating elapsed time
+
     def get_state(self):
         return self.pos
 
     def choose_action(self):
-        # Epsilon-greedy strategy to choose the action
         if random.uniform(0, 1) < self.epsilon:
             return random.choice(list(actions.keys()))  # Explore
         else:
@@ -56,7 +53,7 @@ class AutobotQLearning:
     def update_q_value(self, state, action, reward, next_state):
         old_value = self.q_table[state][action]
         future_value = max(self.q_table[next_state])  # Max Q-value for the next state
-        # Q-Learning formula: Q(s, a) = (1 - alpha) * Q(s, a) + alpha * [reward + gamma * max(Q(s', a'))]
+        # Update Q-value using Q-learning formula
         self.q_table[state][action] = old_value + self.alpha * (reward + self.gamma * future_value - old_value)
 
     def get_reward(self, new_pos):
@@ -87,13 +84,21 @@ class AutobotQLearning:
                 
                 # Move the bot
                 self.pos = new_pos
-                self.learned_path.append(self.pos)  # Keep track of the learned path
+                self.steps += 1  # Increment steps taken
+                self.log_movement(action)  # Log movement
             else:
                 reward = -10  # Penalty for collision
                 self.update_q_value(state, action, reward, state)
         else:
             reward = -10  # Penalty for out-of-bounds or obstacle move
             self.update_q_value(state, action, reward, state)
+
+    def log_movement(self, action):
+        action_names = {0: "Left", 1: "Right", 2: "Up", 3: "Down"}
+        print(f"{self.name} moved {action_names[action]} to {self.pos}")
+
+    def get_total_time(self):
+        return time.time() - self.start_time  # Calculate total time taken
 
 # Read grid and bot positions from the specified file
 grid, bot_positions = read_grid_and_bots_from_file('matrix.txt')
@@ -140,17 +145,32 @@ def create_gui(grid, bots):
             # Display coordinates in each cell
             canvas.create_text((x1 + 50, y1 + 50), text=f"({r},{c})", font=("Arial", 10))
 
+    # Create labels for steps and time taken
+    labels = {}
+    time_labels = {}
+    for bot in bots:
+        labels[bot.name] = tk.Label(root, text=f"{bot.name} Steps: {bot.steps}")
+        labels[bot.name].grid(row=1, column=bots.index(bot))
+        time_labels[bot.name] = tk.Label(root, text=f"{bot.name} Time: {bot.get_total_time():.2f}s")
+        time_labels[bot.name].grid(row=2, column=bots.index(bot))
+
     # Function to animate the autobots
     def animate_bots(bots):
         canvas.delete("bot")  # Clear previous bot positions
         for bot in bots:
             current_pos = bot.pos
             
-            # Draw the bot emoji
+            # Draw the bot name
             if canvas.winfo_exists() and current_pos in cells:
                 canvas.create_text((cells[current_pos][0] + 50, cells[current_pos][1] + 50), 
-                                   text="🚗" if bot.name == "Bot 1" else "🚙", 
-                                   font=("Arial", 24), tags="bot")
+                                    text=bot.name, 
+                                    font=("Arial", 24), tags="bot")
+
+            # Update the label with the number of steps
+            labels[bot.name].config(text=f"{bot.name} Steps: {bot.steps}")
+            # Update the label with the time taken
+            elapsed_time = bot.get_total_time()  # Call the new method here
+            time_labels[bot.name].config(text=f"{bot.name} Time: {elapsed_time:.2f}s")
 
             if bot.pos == bot.dest:
                 r, c = bot.dest
@@ -165,7 +185,7 @@ def create_gui(grid, bots):
         for bot in bots:
             bot.move(bots)
         animate_bots(bots)
-        root.after(1, update)  # Update every second
+        root.after(100, update)  # Update every 100 milliseconds
 
     update()  # Start the update loop
     root.mainloop()
