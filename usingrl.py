@@ -1,24 +1,30 @@
 import tkinter as tk
 import time
 import numpy as np
-import heapq  # For priority queue implementation
 from collections import defaultdict
 import random
+from tkinter import filedialog, messagebox
 
-# Function to read the grid from a file and extract bot positions
-def read_grid_and_bots_from_file(filename):
-    grid = []
-    bot_positions = {}  # Dictionary to store autobot start and destination positions
+# Function to read grid and bot positions from multiple files
+def read_multiple_grids(file_list):
+    grids = []  # List to store grids
+    bot_positions_list = []  # List to store bot positions for each grid
+
+    for filename in file_list:
+        grid = []
+        bot_positions = {}  # Dictionary to store autobot start and destination positions
+        with open(filename, 'r') as file:
+            for r, line in enumerate(file):
+                row = line.strip().split()
+                grid.append(row)
+                for c, cell in enumerate(row):
+                    if cell.startswith('A') or cell.startswith('B'):
+                        bot_positions[cell] = (r, c)
+        
+        grids.append(grid)
+        bot_positions_list.append(bot_positions)
     
-    with open(filename, 'r') as file:
-        for r, line in enumerate(file):
-            row = line.strip().split()
-            grid.append(row)
-            for c, cell in enumerate(row):
-                if cell.startswith('A') or cell.startswith('B'):
-                    bot_positions[cell] = (r, c)
-    
-    return grid, bot_positions
+    return grids, bot_positions_list
 
 # Define actions and their corresponding moves
 actions = {
@@ -28,26 +34,27 @@ actions = {
     3: (1, 0)    # Down
 }
 
-# Define autobot class using Q-learning
+# Define autobot class using Q-learning (same as previous)
 class AutobotQLearning:
     def __init__(self, start, dest, grid, name, alpha=0.1, gamma=0.9, epsilon=0.1):
-        self.pos = start  # Start position
-        self.dest = dest  # Destination position
-        self.grid = grid  # Warehouse grid
-        self.name = name  # Bot name for identification
-        self.q_table = defaultdict(lambda: [0, 0, 0, 0])  # Initialize Q-table with zeros
-        self.alpha = alpha  # Learning rate
-        self.gamma = gamma  # Discount factor
-        self.epsilon = epsilon  # Exploration rate
-        self.index = 0  # Index to track current position in path
-        self.waiting = False  # Flag to indicate if the bot is waiting
-        self.learned_path = []  # To store the learned path
+        self.pos = start
+        self.dest = dest
+        self.grid = grid
+        self.name = name
+        self.q_table = defaultdict(lambda: [0, 0, 0, 0])
+        self.alpha = alpha
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.steps = 0
+        self.time_taken = None
+        self.reached = False
+        self.learned_path = []
+        self.rows, self.cols = len(self.grid), len(self.grid[0])
     
     def get_state(self):
         return self.pos
 
     def choose_action(self):
-        # Epsilon-greedy strategy to choose the action
         if random.uniform(0, 1) < self.epsilon:
             return random.choice(list(actions.keys()))  # Explore
         else:
@@ -55,111 +62,134 @@ class AutobotQLearning:
 
     def update_q_value(self, state, action, reward, next_state):
         old_value = self.q_table[state][action]
-        future_value = max(self.q_table[next_state])  # Max Q-value for the next state
-        # Q-Learning formula: Q(s, a) = (1 - alpha) * Q(s, a) + alpha * [reward + gamma * max(Q(s', a'))]
+        future_value = max(self.q_table[next_state])
         self.q_table[state][action] = old_value + self.alpha * (reward + self.gamma * future_value - old_value)
 
     def get_reward(self, new_pos):
         if new_pos == self.dest:
-            return 100  # Large positive reward for reaching the destination
-        elif self.grid[new_pos[0]][new_pos[1]] == 'X':  # Obstacle
-            return -100  # Large negative reward for hitting an obstacle
+            return 100
+        elif self.grid[new_pos[0]][new_pos[1]] == 'X':
+            return -100
         else:
-            return -1  # Small negative reward for each step taken
+            return -1
     
+    def is_valid_position(self, pos):
+        return 0 <= pos[0] < self.rows and 0 <= pos[1] < self.cols and self.grid[pos[0]][pos[1]] != 'X'
+
     def move(self, bots):
         if self.pos == self.dest:
-            return  # Stop if the bot has reached its destination
-        
+            if not self.reached:
+                self.reached = True
+                self.time_taken = self.steps
+            return
+
         state = self.get_state()
         action = self.choose_action()
         new_pos = (self.pos[0] + actions[action][0], self.pos[1] + actions[action][1])
         
-        # Check bounds and obstacles
-        rows, cols = len(self.grid), len(self.grid[0])
-        if 0 <= new_pos[0] < rows and 0 <= new_pos[1] < cols and self.grid[new_pos[0]][new_pos[1]] != 'X':
-            # Check for collision with other bots
-            if not any(bot.pos == new_pos for bot in bots if bot != self):
-                reward = self.get_reward(new_pos)
-                next_state = new_pos
-                # Update Q-table
-                self.update_q_value(state, action, reward, next_state)
-                
-                # Move the bot
-                self.pos = new_pos
-                self.learned_path.append(self.pos)  # Keep track of the learned path
-            else:
-                reward = -10  # Penalty for collision
-                self.update_q_value(state, action, reward, state)
+        if self.is_valid_position(new_pos) and not any(bot.pos == new_pos for bot in bots if bot != self):
+            reward = self.get_reward(new_pos)
+            next_state = new_pos
+            self.update_q_value(state, action, reward, next_state)
+            self.pos = new_pos
+            self.steps += 1
+            self.learned_path.append(self.pos)
         else:
-            reward = -10  # Penalty for out-of-bounds or obstacle move
+            reward = -10
             self.update_q_value(state, action, reward, state)
 
-# Read grid and bot positions from the specified file
-grid, bot_positions = read_grid_and_bots_from_file('matrix.txt')
-
-# Dynamically initialize Autobots using the parsed positions
-bot1 = AutobotQLearning(start=bot_positions['A1'], dest=bot_positions['B1'], grid=grid, name="Bot 1")
-bot2 = AutobotQLearning(start=bot_positions['A2'], dest=bot_positions['B2'], grid=grid, name="Bot 2")
-bot3 = AutobotQLearning(start=bot_positions['A3'], dest=bot_positions['B3'], grid=grid, name="Bot 3")
-
-# GUI Setup
-def create_gui(grid, bots):
+# GUI Setup with dynamic matrix switching
+def create_gui(grids, bot_positions_list):
     root = tk.Tk()
     root.title("Autobot Warehouse Simulation")
 
-    # Grid canvas
+    # Initial grid setup
+    current_grid_idx = 0  # Track which grid is active
+
+    # Dropdown for selecting a grid
+    def select_grid(index):
+        nonlocal current_grid_idx
+        current_grid_idx = index
+        update_grid()
+
+    # Load Autobots dynamically based on selected grid
+    def load_bots_for_grid(grid_index):
+        bot_positions = bot_positions_list[grid_index]
+        bots = [
+            AutobotQLearning(start=bot_positions['A1'], dest=bot_positions['B1'], grid=grids[grid_index], name="Bot 1"),
+            AutobotQLearning(start=bot_positions['A2'], dest=bot_positions['B2'], grid=grids[grid_index], name="Bot 2"),
+            AutobotQLearning(start=bot_positions['A3'], dest=bot_positions['B3'], grid=grids[grid_index], name="Bot 3")
+        ]
+        return bots
+
+    # Canvas for drawing grid
     canvas = tk.Canvas(root, width=500, height=500)
-    canvas.grid(row=0, column=0)
+    canvas.grid(row=1, column=0)
 
     cell_size = 100
-    rows, cols = len(grid), len(grid[0])
 
-    # Create grid cells
-    cells = {}
-    for r in range(rows):
-        for c in range(cols):
-            x1 = c * cell_size
-            y1 = r * cell_size
-            x2 = x1 + cell_size
-            y2 = y1 + cell_size
+    def update_grid():
+        canvas.delete("all")  # Clear previous grid
+        grid = grids[current_grid_idx]
+        rows, cols = len(grid), len(grid[0])
 
-            if grid[r][c] == 'X':
-                color = 'red'  # Obstacle
-                canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="black")
-            else:
-                canvas.create_rectangle(x1, y1, x2, y2, fill="white", outline="black")
-                cells[(r, c)] = (x1, y1, x2, y2)
+        # Dynamically adjust canvas size based on grid dimensions
+        canvas.config(width=cols * cell_size, height=rows * cell_size)
 
-    # Function to animate the autobots
-    def animate_bots(bots):
-        canvas.delete("bot")  # Clear previous bot positions
-        for bot in bots:
-            current_pos = bot.pos
-            
-            # Draw the bot emoji
-            if canvas.winfo_exists() and current_pos in cells:
-                canvas.create_text((cells[current_pos][0] + 50, cells[current_pos][1] + 50), 
-                                   text="🚗" if bot.name == "Bot 1" else "🚙", 
-                                   font=("Arial", 24), tags="bot")
+        for r in range(rows):
+            for c in range(cols):
+                x1 = c * cell_size
+                y1 = r * cell_size
+                x2 = x1 + cell_size
+                y2 = y1 + cell_size
 
-            if bot.pos == bot.dest:
-                r, c = bot.dest
-                canvas.create_text((cells[(r, c)][0] + 50, cells[(r, c)][1] + 50), text="🏁", font=("Arial", 24))  # Destination reached
-                print(f"{bot.name} reached its destination!")
+                if grid[r][c] == 'X':
+                    canvas.create_rectangle(x1, y1, x2, y2, fill='red', outline="black")
+                else:
+                    canvas.create_rectangle(x1, y1, x2, y2, fill='white', outline="black")
 
-        root.update()
-        time.sleep(0.5)  # Control animation speed
+        bots = load_bots_for_grid(current_grid_idx)
+        update_bots(bots)
 
-    # Start the animation
-    def update():
-        for bot in bots:
-            bot.move(bots)
-        animate_bots(bots)
-        root.after(1000, update)  # Update every second
+    # Animate bots for each grid
+    def update_bots(bots):
+        def animate_bots(bots):
+            canvas.delete("bot")
+            for bot in bots:
+                current_pos = bot.pos
+                if 0 <= current_pos[0] < len(grids[current_grid_idx]) and 0 <= current_pos[1] < len(grids[current_grid_idx][0]):
+                    canvas.create_text(current_pos[1] * cell_size + 50, current_pos[0] * cell_size + 50, 
+                                       text="🚗" if bot.name == "Bot 1" else "🚙", font=("Arial", 24), tags="bot")
+                if bot.pos == bot.dest:
+                    print(f"{bot.name} reached its destination in {bot.time_taken} steps!")
+            root.update()
 
-    update()  # Start the update loop
+        def update():
+            for bot in bots:
+                bot.move(bots)
+            animate_bots(bots)
+            root.after(500, update)
+
+        update()
+
+    # Dropdown for grid selection
+    dropdown = tk.OptionMenu(root, tk.StringVar(value="Select Grid"), *[f"Grid {i+1}" for i in range(len(grids))], command=lambda value: select_grid(int(value.split()[-1]) - 1))
+    dropdown.grid(row=0, column=0)
+
+    # Initial grid and bots
+    update_grid()
+
     root.mainloop()
 
-# Create the GUI and start the animation
-create_gui(grid, [bot1, bot2, bot3])
+# File dialog to select multiple grid files
+def open_files():
+    file_paths = filedialog.askopenfilenames(title="Select Matrix Files", filetypes=[("Text files", "*.txt")])
+    if file_paths:
+        grids, bot_positions_list = read_multiple_grids(file_paths)
+        create_gui(grids, bot_positions_list)
+    else:
+        messagebox.showwarning("No files selected", "Please select at least one file!")
+
+# Main entry point to start the program
+if __name__ == "__main__":
+    open_files()
