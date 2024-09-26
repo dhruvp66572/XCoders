@@ -4,6 +4,10 @@
 
 This project simulates autonomous bots navigating a warehouse grid using the A* pathfinding algorithm. The bots can detect obstacles, avoid collisions, and find the shortest path to their destination. The graphical user interface (GUI) built with Tkinter allows users to define bot start and end positions, obstacles, and view the command log of bot movements.
 
+## Youtube Link
+
+- https://youtu.be/vgRWjivmgls
+
 ## Features
 
 - **Pathfinding Algorithm**: Utilizes the A* algorithm for efficient pathfinding.
